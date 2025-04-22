@@ -1,0 +1,199 @@
+// src/main.jsx
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import FitnessRPGTracker from './FitnessRPGTracker';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <FitnessRPGTracker />
+  </React.StrictMode>
+);
+
+// src/FitnessRPGTracker.jsx
+import { useState, useEffect } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+} from "firebase/auth";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  getDocs,
+  query
+} from "firebase/firestore";
+
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyArT8ZNFCEPl1IDi7TJKz_MRaskjIpCC_U",
+  authDomain: "fitness-rpg-ab102.firebaseapp.com",
+  projectId: "fitness-rpg-ab102",
+  storageBucket: "fitness-rpg-ab102.firebasestorage.app",
+  messagingSenderId: "491200345285",
+  appId: "1:491200345285:web:7b7a19ac974f0a344e2cac",
+  measurementId: "G-LNSQNQBCFG"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+export default function FitnessRPGTracker() {
+  const [user, setUser] = useState(null);
+  const [xp, setXP] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [log, setLog] = useState([]);
+  const [friends, setFriends] = useState([]);
+
+  const xpPerLevel = 500;
+
+  useEffect(() => {
+    onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        setUser(u);
+        const docRef = doc(db, "users", u.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setXP(data.xp);
+          setLevel(data.level);
+          setLog(data.log);
+        } else {
+          await setDoc(docRef, { xp: 0, level: 1, log: [], name: u.displayName });
+        }
+
+        // Load other users
+        const q = query(collection(db, "users"));
+        const querySnapshot = await getDocs(q);
+        const others = [];
+        querySnapshot.forEach((docSnap) => {
+          if (docSnap.id !== u.uid) {
+            const d = docSnap.data();
+            others.push({ name: d.name || "Friend", level: d.level || 1 });
+          }
+        });
+        setFriends(others);
+      } else {
+        setUser(null);
+      }
+    });
+  }, []);
+
+  const handleSignIn = async () => {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    const u = result.user;
+    const docRef = doc(db, "users", u.uid);
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) {
+      await setDoc(docRef, { xp: 0, level: 1, log: [], name: u.displayName });
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut(auth);
+  };
+
+  const gainXP = async (amount, name) => {
+    const newXP = xp + amount;
+    const newLevel = Math.floor(newXP / xpPerLevel) + 1;
+    const newLog = [...log, `+${amount} XP for ${name}`];
+
+    setXP(newXP);
+    setLevel(newLevel);
+    setLog(newLog);
+
+    if (user) {
+      const docRef = doc(db, "users", user.uid);
+      await updateDoc(docRef, {
+        xp: newXP,
+        level: newLevel,
+        log: newLog,
+        name: user.displayName,
+      });
+    }
+  };
+
+  const progress = (xp % xpPerLevel) / xpPerLevel * 100;
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center">
+        <h1 className="text-2xl font-bold mb-4">Fitness RPG Tracker</h1>
+        <Button onClick={handleSignIn}>Sign in with Google</Button>
+      </div>
+    );
+  }
+
+  const activities = [
+    { name: "Walk 5,000+ steps", xp: 100 },
+    { name: "Just Dance session", xp: 75 },
+    { name: "Stretching routine", xp: 50 },
+    { name: "Drink 2L water", xp: 50 },
+    { name: "No sugar/junk food", xp: 50 },
+    { name: "Switch mouse hand", xp: 25 },
+  ];
+
+  return (
+    <div className="p-6 space-y-6 max-w-xl mx-auto">
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <h1 className="text-2xl font-bold">🧝 Fitness RPG Tracker</h1>
+            <Button variant="outline" onClick={handleSignOut}>Sign Out</Button>
+          </div>
+          <p>Welcome, {user.displayName}</p>
+          <p>Level: {level}</p>
+          <Progress value={progress} />
+          <p>{xp % xpPerLevel} / {xpPerLevel} XP to next level</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <h2 className="text-xl font-semibold">🎯 Log Activity</h2>
+          <div className="grid gap-2">
+            {activities.map((act, i) => (
+              <Button key={i} onClick={() => gainXP(act.xp, act.name)}>
+                {act.name} (+{act.xp} XP)
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4">
+          <h2 className="text-xl font-semibold">📜 Activity Log</h2>
+          <ul className="list-disc pl-5 space-y-1">
+            {log.slice().reverse().map((entry, i) => (
+              <li key={i}>{entry}</li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4">
+          <h2 className="text-xl font-semibold">👥 Party Members</h2>
+          <ul className="list-disc pl-5 space-y-1">
+            {friends.map((f, i) => (
+              <li key={i}>{f.name} - Level {f.level}</li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
